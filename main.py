@@ -74,24 +74,21 @@ def connect_mqtt():
     client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
     return client
 
+
 def draw_boxes(frame, result, width, height, p):
-    '''
-    Draw bounding boxes onto the frame.
-    '''
-    people_count = 0
-    for box in result[0][0]: # Output shape is 1x1x100x7
+    count = 0
+    p1 = None
+    p2 = None
+    for box in result[0][0]:
         conf = box[2]
         if conf >= p:
-            people_count += 1
-            xmin = int(box[3] * width)
-            ymin = int(box[4] * height)
-            xmax = int(box[5] * width)
-            ymax = int(box[6] * height)
-            cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (255, 0, 0), 1)
-            
-    return frame, people_count
+            p1 = (int(box[3] * width), int(box[4] * height))
+            p2 = (int(box[5] * width), int(box[6] * height))
+            cv2.rectangle(frame, p1, p2, (255, 0, 0))
+            count += 1
+    return frame, count, (p1, p2)
 
-# def infer_on_stream(args, client):
+
 def infer_on_stream(args, client):
     """
     Initialize the inference network, stream video to network,
@@ -134,6 +131,8 @@ def infer_on_stream(args, client):
     people_count = 0
     total_count = 0
     
+    no_box = 0
+    prev_box_x = 0
     start_time = 0
     duration = 0
     
@@ -146,11 +145,11 @@ def infer_on_stream(args, client):
         
         ### TODO: Pre-process the image as needed ###
         image = cv2.resize(frame, (network_shape[3], network_shape[2]))
-        image_p = image.transpose((2, 0, 1))
-        image_p = image_p.reshape(1, *image_p.shape)
+        image = image.transpose((2, 0, 1))
+        image = image.reshape(1, *image.shape)
 
         ### TODO: Start asynchronous inference for specified request ###
-        infer_network.exec_net(image_p, next_req_id)
+        infer_network.exec_net(image, next_req_id)
         
         ### TODO: Wait for the result ###
         if infer_network.wait(current_req_id) == 0:
@@ -158,25 +157,35 @@ def infer_on_stream(args, client):
             result = infer_network.get_output(current_req_id)
 
             ### TODO: Extract any desired stats from the results ###
-            frame, people_count = draw_boxes(frame, result, width, height, prob_threshold)
-            
+            frame, people_count, box = draw_boxes(frame, result, width, height, prob_threshold)
+            box_w = frame.shape[1]
+            top_left, bottom_right = box
+                
             if people_count > last_count:
                 start_time = time.time()
                 total_count += people_count - last_count
-                client.publish("person", json.dumps({"total": total_count}))
-            
-            if people_count < last_count: # Average Time
-                duration = int(time.time() - start_time) 
-                client.publish("person/duration", json.dumps({"duration": duration}))
-            
+                no_box = 0
+                client.publish("person", json.dumps({"total":total_count}))
+            elif people_count < last_count:
+                if no_box <= 20:
+                    people_count = last_count
+                    no_box += 1
+                elif prev_box_x < box_w - 200:
+                    people_count = last_count
+                    no_box = 0
+                else:
+                    duration = int(time.time() - start_time)
+                    client.publish("person/duration", json.dumps({"duration":duration}))
+                    
+            if top_left != None and bottom_right != None:
+                prev_box_x = int((top_left[0] + bottom_right[0]) / 2)
             
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
-            ### Topic "person/duration": key of "duration" ###
-            client.publish("person", json.dumps({"count": people_count}))
-            last_count = people_count
-            
+            ### Topic "person/duration": key of "duration" ###            
+            last_count = people_count      
+            client.publish("person", json.dumps({"count":people_count}))
 
         ### TODO: Send the frame to the FFMPEG server ###
         sys.stdout.buffer.write(frame)  
