@@ -105,9 +105,10 @@ def infer_on_stream(args, client):
     infer_network = Network()
     # Set Probability threshold for detections
     prob_threshold = args.prob_threshold
-
+    
     ### TODO: Load the model through `infer_network` ###
-    infer_network.load_model(args.model, args.device, args.cpu_extension)
+    num_requests = 2
+    infer_network.load_model(args.model, num_requests, args.device, args.cpu_extension)
     network_shape = infer_network.get_input_shape()
 
     stream_flag = False
@@ -125,7 +126,9 @@ def infer_on_stream(args, client):
     # additional parameters
     width = int(cap.get(3))
     height = int(cap.get(4))
-    request_id = 0
+    
+    current_req_id = 0
+    next_req_id = 1
 
     last_count = 0
     people_count = 0
@@ -147,12 +150,12 @@ def infer_on_stream(args, client):
         image_p = image_p.reshape(1, *image_p.shape)
 
         ### TODO: Start asynchronous inference for specified request ###
-        infer_network.exec_net(image_p, request_id)
+        infer_network.exec_net(image_p, next_req_id)
         
         ### TODO: Wait for the result ###
-        if infer_network.wait(request_id) == 0:
+        if infer_network.wait(current_req_id) == 0:
             ### TODO: Get the results of the inference request ###
-            result = infer_network.get_output(request_id)
+            result = infer_network.get_output(current_req_id)
 
             ### TODO: Extract any desired stats from the results ###
             frame, people_count = draw_boxes(frame, result, width, height, prob_threshold)
@@ -165,7 +168,6 @@ def infer_on_stream(args, client):
             if people_count < last_count: # Average Time
                 duration = int(time.time() - start_time) 
                 client.publish("person/duration", json.dumps({"duration": duration}))
-            
             
             
             ### TODO: Calculate and send relevant information on ###
@@ -183,13 +185,13 @@ def infer_on_stream(args, client):
         ### TODO: Write an output image if `single_image_mode` ###
         if stream_flag:
             cv2.imwrite('output_image.jpg', frame)
-            
+        
+        current_req_id, next_req_id = next_req_id, current_req_id
     # Release the capture and destroy any OpenCV windows
     cap.release()
     cv2.destroyAllWindows()
     # Disconnect from MQTT
     client.disconnect()
-    infer_network.clean()
 
 def main():
     """

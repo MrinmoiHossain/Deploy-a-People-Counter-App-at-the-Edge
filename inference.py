@@ -43,7 +43,7 @@ class Network:
         self.exec_network = None
         self.infer_request = None
 
-    def load_model(self, model, device="CPU", cpu_extension=None):
+    def load_model(self, model, num_requests, device="CPU", cpu_extension=None):
         model_xml = model
         model_bin = os.path.splitext(model_xml)[0] + ".bin"
         ### TODO: Load the model ###
@@ -64,7 +64,7 @@ class Network:
             exit(1)
             
         ### TODO: Return the loaded inference plugin ###
-        self.exec_network = self.plugin.load_network(self.network, device)
+        self.exec_network = self.plugin.load_network(self.network, num_requests = num_requests, device_name = device)
         # Get the input layer
         self.input_blob = next(iter(self.network.inputs))
         self.output_blob = next(iter(self.network.outputs))
